@@ -74,19 +74,6 @@ class YouRM(dspy.Retrieve):
         return collected_results
 
 
-class BingSearch(dspy.Retrieve):
-    def __init__(
-        self,
-        bing_search_api_key=None,
-        k=3,
-        is_valid_source: Callable = None,
-        min_char_count: int = 150,
-        snippet_chunk_size: int = 1000,
-        webpage_helper_max_threads=10,
-        mkt="en-US",
-        language="en",
-        **kwargs,
-    ):
         """
         Params:
             min_char_count: Minimum character count for the article to be considered valid.

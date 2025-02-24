@@ -944,6 +944,15 @@ class OllamaClient(dspy.OllamaLocal):
         # Store additional kwargs for the generate method.
         self.kwargs = {**self.kwargs, **kwargs}
 
+        ollama = OllamaClient(model="llama", port=11434)
+
+        # Exemple d'utilisation : Envoi d'un message avec le client
+        response = ollama.chat(model="llama", messages=[{"role": "user", "content": "Hello!"}])
+
+        # Affichage de la réponse
+        print(response)
+
+
 
 class TGIClient(dspy.HFClientTGI):
     def __init__(self, model, port, url, http_request_kwargs=None, **kwargs):

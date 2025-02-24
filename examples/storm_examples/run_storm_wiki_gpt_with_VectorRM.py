@@ -27,249 +27,156 @@ args.output_dir/
 """
 
 import os
+import hashlib
+import pandas as pd
+import chromadb
 from argparse import ArgumentParser
+from langchain_ollama import OllamaLLM
+from langchain_huggingface import HuggingFaceEmbeddings
 
-from knowledge_storm import (
-    STORMWikiRunnerArguments,
-    STORMWikiRunner,
-    STORMWikiLMConfigs,
-)
-from knowledge_storm.rm import VectorRM
-from knowledge_storm.lm import OpenAIModel, AzureOpenAIModel
-from knowledge_storm.utils import load_api_key, QdrantVectorStoreManager
+def check_existing_document(collection, document_id):
+    """Vérifie si un document existe déjà dans la collection sans générer de doublon."""
+    try:
+        existing_data = collection.get(ids=[document_id])
+        print(f"🔍 Vérification de l'existence du document {document_id}: {existing_data}")
+        if existing_data and "ids" in existing_data and document_id in existing_data["ids"]:
+            return document_id  # Retourne l'ID si trouvé
+    except Exception as e:
+        print(f"❌ Erreur lors de la vérification du document : {e}")
+    return None
 
+def check_similar_embeddings(collection, vector, threshold=0.95):
+    """Vérifie si un embedding similaire existe déjà dans la collection."""
+    try:
+        results = collection.query(query_embeddings=[vector], n_results=1)
+        if results and "documents" in results and len(results["documents"]) > 0:
+            similarity = results["distances"][0]
+            if similarity < (1 - threshold):  # Plus la similarité est élevée, moins il y a de doublons
+                return False
+            else:
+                print(f"⚠️ Embedding similaire trouvé avec une similarité de {similarity}")
+                return True
+    except Exception as e:
+        print(f"❌ Erreur lors de la vérification des embeddings similaires : {e}")
+    return False
+
+def update_existing_document(collection, document_id, document_content, vector, source):
+    """Met à jour un document existant."""
+    try:
+        collection.update(
+            ids=[document_id],
+            embeddings=[vector],
+            documents=[document_content],
+            metadatas=[{"source": source}]
+        )
+        print(f"🔄 Document mis à jour (ID: {document_id})")
+    except Exception as e:
+        print(f"❌ Erreur lors de la mise à jour du document : {e}")
+
+def add_or_update_document(collection, document_content, embedder, source):
+    """Ajoute ou met à jour un document dans la collection sans doublon."""
+    document_id = hashlib.md5(document_content.encode()).hexdigest()
+    
+    # Vérification de l'existence du document par ID
+    existing_id = check_existing_document(collection, document_id)
+    
+    try:
+        # Calcul du vecteur pour l'embedding
+        vector = embedder.embed_documents([document_content])[0]
+        
+        # Vérification des embeddings similaires si le document n'existe pas par ID
+        if not existing_id:
+            if check_similar_embeddings(collection, vector):
+                print(f"⚠️ Document similaire trouvé avec un embedding proche. Aucun doublon ajouté.")
+                return  # Ne pas ajouter si une similarité est détectée
+        
+        # Mise à jour ou ajout du document
+        if existing_id:
+            print(f"🔄 Document déjà existant avec ID {document_id}. Mise à jour...")
+            update_existing_document(collection, existing_id, document_content, vector, source)
+        else:
+            collection.add(
+                ids=[document_id],
+                embeddings=[vector],
+                documents=[document_content],
+                metadatas=[{"source": source}]
+            )
+            print(f"✅ Document ajouté (ID: {document_id})")
+    except Exception as e:
+        print(f"❌ Erreur lors de l'ajout/mise à jour du document : {e}")
+
+def search_documents(query, collection_name, search_top_k, embedder, client):
+    """Effectue une recherche sur les documents indexés."""
+    try:
+        collection = client.get_or_create_collection(collection_name)
+        query_embedding = embedder.embed_documents([query])[0]
+        result = collection.query(query_embeddings=[query_embedding], n_results=search_top_k)
+        
+        documents_with_metadata = []
+        if result and isinstance(result, dict) and "documents" in result and "metadatas" in result:
+            for doc, metadata in zip(result["documents"], result["metadatas"]):
+                if doc:
+                    documents_with_metadata.append({
+                        "document": doc[0] if isinstance(doc, list) else doc,
+                        "metadata": metadata
+                    })
+        return documents_with_metadata
+    except Exception as e:
+        print(f"❌ Erreur lors de la recherche de documents : {e}")
+        return []
+
+def parse_arguments():
+    """Gestion des arguments CLI."""
+    parser = ArgumentParser()
+    parser.add_argument("--csv-file-path", type=str, default=None, help="Chemin du fichier CSV contenant les documents.")
+    parser.add_argument("--collection-name", type=str, default="my_documents", help="Nom de la collection dans ChromaDB.")
+    parser.add_argument("--embedding-model", type=str, default="sentence-transformers/all-MiniLM-L6-v2", help="Modèle d'embedder à utiliser.")
+    parser.add_argument("--search-top-k", type=int, default=3, help="Nombre de documents à récupérer pour la recherche.")
+    parser.add_argument("--clear-existing", action='store_true', help="Supprimer les embeddings existants avant d'ajouter de nouveaux documents.")
+    return parser.parse_args()
 
 def main(args):
-    # Load API key from the specified toml file path
-    load_api_key(toml_file_path="secrets.toml")
-
-    # Initialize the language model configurations
-    engine_lm_configs = STORMWikiLMConfigs()
-    openai_kwargs = {
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "temperature": 1.0,
-        "top_p": 0.9,
-    }
-
-    ModelClass = (
-        OpenAIModel if os.getenv("OPENAI_API_TYPE") == "openai" else AzureOpenAIModel
-    )
-    # If you are using Azure service, make sure the model name matches your own deployed model name.
-    # The default name here is only used for demonstration and may not match your case.
-    gpt_35_model_name = (
-        "gpt-3.5-turbo" if os.getenv("OPENAI_API_TYPE") == "openai" else "gpt-35-turbo"
-    )
-    gpt_4_model_name = "gpt-4o"
-    if os.getenv("OPENAI_API_TYPE") == "azure":
-        openai_kwargs["api_base"] = os.getenv("AZURE_API_BASE")
-        openai_kwargs["api_version"] = os.getenv("AZURE_API_VERSION")
-
-    # STORM is a LM system so different components can be powered by different models.
-    # For a good balance between cost and quality, you can choose a cheaper/faster model for conv_simulator_lm
-    # which is used to split queries, synthesize answers in the conversation. We recommend using stronger models
-    # for outline_gen_lm which is responsible for organizing the collected information, and article_gen_lm
-    # which is responsible for generating sections with citations.
-    conv_simulator_lm = ModelClass(
-        model=gpt_35_model_name, max_tokens=500, **openai_kwargs
-    )
-    question_asker_lm = ModelClass(
-        model=gpt_35_model_name, max_tokens=500, **openai_kwargs
-    )
-    outline_gen_lm = ModelClass(model=gpt_4_model_name, max_tokens=400, **openai_kwargs)
-    article_gen_lm = ModelClass(model=gpt_4_model_name, max_tokens=700, **openai_kwargs)
-    article_polish_lm = ModelClass(
-        model=gpt_4_model_name, max_tokens=4000, **openai_kwargs
-    )
-
-    engine_lm_configs.set_conv_simulator_lm(conv_simulator_lm)
-    engine_lm_configs.set_question_asker_lm(question_asker_lm)
-    engine_lm_configs.set_outline_gen_lm(outline_gen_lm)
-    engine_lm_configs.set_article_gen_lm(article_gen_lm)
-    engine_lm_configs.set_article_polish_lm(article_polish_lm)
-
-    # Initialize the engine arguments
-    engine_args = STORMWikiRunnerArguments(
-        output_dir=args.output_dir,
-        max_conv_turn=args.max_conv_turn,
-        max_perspective=args.max_perspective,
-        search_top_k=args.search_top_k,
-        max_thread_num=args.max_thread_num,
-    )
-
-    # Create / update the vector store with the documents in the csv file
+    """Point d'entrée principal du script."""
+    llm = OllamaLLM(model="llama2")
+    client = chromadb.PersistentClient(path="./chroma_db")
+    embedder = HuggingFaceEmbeddings(model_name=args.embedding_model)
+    
+    if args.clear_existing:
+        client.delete_collection(args.collection_name)
+        print("✅ Ancienne collection supprimée.")
+    
     if args.csv_file_path:
-        kwargs = {
-            "file_path": args.csv_file_path,
-            "content_column": "content",
-            "title_column": "title",
-            "url_column": "url",
-            "desc_column": "description",
-            "batch_size": args.embed_batch_size,
-            "vector_db_mode": args.vector_db_mode,
-            "collection_name": args.collection_name,
-            "embedding_model": args.embedding_model,
-            "device": args.device,
-        }
-        if args.vector_db_mode == "offline":
-            QdrantVectorStoreManager.create_or_update_vector_store(
-                vector_store_path=args.offline_vector_db_dir, **kwargs
-            )
-        elif args.vector_db_mode == "online":
-            QdrantVectorStoreManager.create_or_update_vector_store(
-                url=args.online_vector_db_url,
-                api_key=os.getenv("QDRANT_API_KEY"),
-                **kwargs
-            )
-
-    # Setup VectorRM to retrieve information from your own data
-    rm = VectorRM(
-        collection_name=args.collection_name,
-        embedding_model=args.embedding_model,
-        device=args.device,
-        k=engine_args.search_top_k,
-    )
-
-    # initialize the vector store, either online (store the db on Qdrant server) or offline (store the db locally):
-    if args.vector_db_mode == "offline":
-        rm.init_offline_vector_db(vector_store_path=args.offline_vector_db_dir)
-    elif args.vector_db_mode == "online":
-        rm.init_online_vector_db(
-            url=args.online_vector_db_url, api_key=os.getenv("QDRANT_API_KEY")
-        )
-
-    # Initialize the STORM Wiki Runner
-    runner = STORMWikiRunner(engine_args, engine_lm_configs, rm)
-
-    # run the pipeline
-    topic = input("Topic: ")
-    runner.run(
-        topic=topic,
-        do_research=args.do_research,
-        do_generate_outline=args.do_generate_outline,
-        do_generate_article=args.do_generate_article,
-        do_polish_article=args.do_polish_article,
-    )
-    runner.post_run()
-    runner.summary()
-
+        try:
+            df = pd.read_csv(args.csv_file_path, dtype=str).fillna("unknown")
+            if not all(col in df.columns for col in ["content", "title", "url", "description"]):
+                print("⚠️ Le fichier CSV doit contenir les colonnes: content, title, url, description")
+                return
+            
+            collection = client.get_or_create_collection(args.collection_name)
+            for _, row in df.iterrows():
+                document_content = row["content"].strip()
+                if document_content:
+                    add_or_update_document(collection, document_content, embedder, row["url"])
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement du CSV : {e}")
+    else:
+        print("⚠️ Aucun fichier CSV spécifié. Aucun document ajouté.")
+    
+    topic = input("📝 Entrez un sujet de recherche : ")
+    result = search_documents(topic, args.collection_name, args.search_top_k, embedder, client)
+    
+    print(f"\n🔍 Documents trouvés pour '{topic}':")
+    for idx, doc in enumerate(result):
+        print(f"\n📄 Document {idx+1}:\n{doc['document']}")
+        metadata = doc['metadata'] if isinstance(doc['metadata'], dict) else {'source': 'inconnue'}
+        print(f"🔗 Source: {metadata.get('source', 'inconnue')}")
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    # global arguments
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="./results/gpt_retrieval",
-        help="Directory to store the outputs.",
-    )
-    parser.add_argument(
-        "--max-thread-num",
-        type=int,
-        default=3,
-        help="Maximum number of threads to use. The information seeking part and the article generation"
-        "part can speed up by using multiple threads. Consider reducing it if keep getting "
-        '"Exceed rate limit" error when calling LM API.',
-    )
-    # provide local corpus and set up vector db
-    parser.add_argument(
-        "--collection-name",
-        type=str,
-        default="my_documents",
-        help="The collection name for vector store.",
-    )
-    parser.add_argument(
-        "--embedding_model",
-        type=str,
-        default="BAAI/bge-m3",
-        help="The collection name for vector store.",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="mps",
-        help="The device used to run the retrieval model (mps, cuda, cpu, etc).",
-    )
-    parser.add_argument(
-        "--vector-db-mode",
-        type=str,
-        choices=["offline", "online"],
-        help="The mode of the Qdrant vector store (offline or online).",
-    )
-    parser.add_argument(
-        "--offline-vector-db-dir",
-        type=str,
-        default="./vector_store",
-        help="If use offline mode, please provide the directory to store the vector store.",
-    )
-    parser.add_argument(
-        "--online-vector-db-url",
-        type=str,
-        help="If use online mode, please provide the url of the Qdrant server.",
-    )
-    parser.add_argument(
-        "--csv-file-path",
-        type=str,
-        default=None,
-        help="The path of the custom document corpus in CSV format. The CSV file should include "
-        "content, title, url, and description columns.",
-    )
-    parser.add_argument(
-        "--embed-batch-size",
-        type=int,
-        default=64,
-        help="Batch size for embedding the documents in the csv file.",
-    )
-    # stage of the pipeline
-    parser.add_argument(
-        "--do-research",
-        action="store_true",
-        help="If True, simulate conversation to research the topic; otherwise, load the results.",
-    )
-    parser.add_argument(
-        "--do-generate-outline",
-        action="store_true",
-        help="If True, generate an outline for the topic; otherwise, load the results.",
-    )
-    parser.add_argument(
-        "--do-generate-article",
-        action="store_true",
-        help="If True, generate an article for the topic; otherwise, load the results.",
-    )
-    parser.add_argument(
-        "--do-polish-article",
-        action="store_true",
-        help="If True, polish the article by adding a summarization section and (optionally) removing "
-        "duplicate content.",
-    )
-    # hyperparameters for the pre-writing stage
-    parser.add_argument(
-        "--max-conv-turn",
-        type=int,
-        default=3,
-        help="Maximum number of questions in conversational question asking.",
-    )
-    parser.add_argument(
-        "--max-perspective",
-        type=int,
-        default=3,
-        help="Maximum number of perspectives to consider in perspective-guided question asking.",
-    )
-    parser.add_argument(
-        "--search-top-k",
-        type=int,
-        default=3,
-        help="Top k search results to consider for each search query.",
-    )
-    # hyperparameters for the writing stage
-    parser.add_argument(
-        "--retrieve-top-k",
-        type=int,
-        default=3,
-        help="Top k collected references for each section title.",
-    )
-    parser.add_argument(
-        "--remove-duplicate",
-        action="store_true",
-        help="If True, remove duplicate content from the article.",
-    )
-    main(parser.parse_args())
+    main(parse_arguments())
+
+    args = parse_arguments()
+    main(args)
+
+
+
+
