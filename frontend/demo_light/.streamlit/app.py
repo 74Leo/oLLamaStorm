@@ -30,10 +30,14 @@ def load_documents(csv_paths):
     
     for csv_path in csv_paths:
         try:
-            df = pd.read_csv(csv_path).fillna("")
+            df = pd.read_csv(csv_path, sep='|').fillna("")
             for _, row in df.iterrows():
                 document_text = row.get("content", "")
                 source = row.get("url", "Unknown")
+                
+                if not document_text:
+                    st.warning(f"⚠️ Le document {doc_id} n'a pas de contenu, ignoré.")
+                    continue
                 
                 embedding = embedder.embed_query(document_text)
                 if len(embedding) != 384:
@@ -47,13 +51,14 @@ def load_documents(csv_paths):
                 ))
                 doc_id += 1
         except Exception as e:
-            st.error(f"❌ Erreur lors du chargement : {str(e)}")
+            st.error(f"❌ Erreur lors du chargement de {csv_path} : {str(e)}")
     return documents
 
 csv_paths = [
     "C:/Users/Dev1/Documents/Storm/storm/examples/storm_examples/documents.csv",
     "C:/Users/Dev1/Documents/Storm/storm/examples/storm_examples/fruits.csv",
-    "C:/Users/Dev1/Documents/Storm/storm/examples/storm_examples/sport.csv"
+    "C:/Users/Dev1/Documents/Storm/storm/examples/storm_examples/sport.csv",
+    "C:/Users/Dev1/Documents/Storm/storm/examples/storm_examples/games.csv"
 ]
 
 documents = load_documents(csv_paths)
@@ -65,7 +70,7 @@ if documents:
         st.error(f"❌ Erreur lors de l'insertion des documents : {str(e)}")
 
 # Fonction de recherche
-def search_documents(query, collection_name, search_top_k=1, similarity_threshold=1):
+def search_documents(query, collection_name, search_top_k=1, similarity_threshold=0.5):
     query_embedding = embedder.embed_query(query)
     search_results = client.search(collection_name=collection_name, query_vector=query_embedding, limit=search_top_k)
     
@@ -79,11 +84,11 @@ def search_documents(query, collection_name, search_top_k=1, similarity_threshol
     ]
 
 # Interaction utilisateur
-user_input = st.text_input("🗨️ You: ", "", key="user_input")
+user_input = st.text_input("🗨️ Vous : ", "", key="user_input")
 
-if st.button("Send"):
+if st.button("Envoyer"):
     if user_input:
-        search_results = search_documents(user_input, collection_name, similarity_threshold=0.5)
+        search_results = search_documents(user_input, collection_name)
         
         if search_results:
             context = "\n\n".join([doc["content"] for doc in search_results])
@@ -97,7 +102,7 @@ if st.button("Send"):
         )
         ollama_answer = response['choices'][0]['message']['content']
         
-        st.write(f"🤖 **Assistant:** {ollama_answer}")
+        st.write(f"🤖 **Assistant :** {ollama_answer}")
         
         if search_results:
             st.subheader("📄 Documents utilisés :")

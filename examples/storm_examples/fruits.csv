@@ -1,9 +1,9 @@
-content,title,url,description
-"La pomme est un fruit comestible produit par le pommier. Elle est riche en fibres et en vitamines. Les pommes peuvent être rouges, vertes ou jaunes.","Pomme","https://example.com/pomme","Information sur les pommes"
-"La banane est un fruit comestible produit par . Elle est riche en fibres et en vitamines. Les bananes peuvent être jaunes, vertes ou noires.","Banane","https://example.com/banane","Information sur les bananes"
-"La fraise est un fruit comestible, très sucré et juteux. Elle est souvent utilisée dans les desserts et les salades.","Fraise","https://example.com/fraise","Information sur les fraises"
-"L'orange est un agrume, connue pour sa richesse en vitamine C. Elle est souvent consommée sous forme de jus.","Orange","https://example.com/orange","Information sur les oranges"
-"Le kiwi est un fruit comestible, avec une peau brune et une chair verte. Il est riche en vitamines et en antioxydants.","Kiwi","https://example.com/kiwi","Information sur les kiwis"
-"Le raisin est un fruit comestible qui peut être rouge, vert ou noir. Il est souvent utilisé pour produire du vin.","Raisin","https://example.com/raisin","Information sur les raisins"
-"Ananas est un fruit tropical sucré et juteux. Il est souvent utilisé dans les cocktails et les plats sucrés-salés.","Ananas","https://example.com/ananas","Information sur les ananas"
-"Les cerises sont de petits fruits rouges ou noirs, sucrés ou acides. Elles sont souvent utilisées dans les desserts.","Cerise","https://example.com/cerise","Information sur les cerises"
+content|title|url|description
+"La pomme est un fruit comestible produit par le pommier. Elle est riche en fibres et en vitamines. Les pommes peuvent être rouges| vertes ou jaunes."|"Pomme"|"https://example.com/pomme"|"Information sur les pommes"
+"La banane est un fruit comestible produit par . Elle est riche en fibres et en vitamines. Les bananes peuvent être jaunes| vertes ou noires."|"Banane"|"https://example.com/banane"|"Information sur les bananes"
+"La fraise est un fruit comestible| très sucré et juteux. Elle est souvent utilisée dans les desserts et les salades."|"Fraise"|"https://example.com/fraise"|"Information sur les fraises"
+"L'orange est un agrume| connue pour sa richesse en vitamine C. Elle est souvent consommée sous forme de jus."|"Orange"|"https://example.com/orange"|"Information sur les oranges"
+"Le kiwi est un fruit comestible| avec une peau brune et une chair verte. Il est riche en vitamines et en antioxydants."|"Kiwi"|"https://example.com/kiwi"|"Information sur les kiwis"
+"Le raisin est un fruit comestible qui peut être rouge| vert ou noir. Il est souvent utilisé pour produire du vin."|"Raisin"|"https://example.com/raisin"|"Information sur les raisins"
+"Ananas est un fruit tropical sucré et juteux. Il est souvent utilisé dans les cocktails et les plats sucrés-salés."|"Ananas"|"https://example.com/ananas"|"Information sur les ananas"
+"Les cerises sont de petits fruits rouges ou noirs| sucrés ou acides. Elles sont souvent utilisées dans les desserts."|"Cerise"|"https://example.com/cerise"|"Information sur les cerises"

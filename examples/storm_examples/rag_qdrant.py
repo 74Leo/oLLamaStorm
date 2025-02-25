@@ -61,9 +61,23 @@ def load_documents_from_csv(directory, client, collection_name, embedder):
     for filename in os.listdir(directory):
         if filename.endswith('.csv'):
             file_path = os.path.join(directory, filename)
-            df = pd.read_csv(file_path, dtype=str).fillna("unknown")
-            for _, row in df.iterrows():
-                add_document(client, collection_name, str(row["content"]).strip(), embedder, file_path)
+            try:
+                # Mettez à jour ici pour utiliser le séparateur '|'
+                df = pd.read_csv(file_path, dtype=str, header=0, sep='|').fillna("unknown")
+                print(f"Noms des colonnes dans {filename} : {df.columns.tolist()}")
+                for _, row in df.iterrows():
+                    content = str(row["content"]).strip()
+                    title = str(row["title"]).strip()
+                    url = str(row["url"]).strip()
+                    description = str(row["description"]).strip()
+
+                    combined_content = f"{title}\n{description}\n{content}"
+                    add_document(client, collection_name, combined_content, embedder, url)
+            except Exception as e:
+                print(f"❌ Erreur lors de la lecture du fichier {file_path} : {e}")
+
+
+
 
 def search_best_document(query, collection_name, embedder, client, similarity_threshold=0.3):
     """Cherche le document le plus pertinent par rapport à la requête."""
@@ -78,7 +92,7 @@ def search_best_document(query, collection_name, embedder, client, similarity_th
 
 def parse_arguments():
     parser = ArgumentParser()
-    parser.add_argument("--csv-dir", type=str, default=None, help="Dossier contenant les fichiers CSV.")
+    parser.add_argument("--csv-dir", type=str, required=True, help="Dossier contenant les fichiers CSV.")
     parser.add_argument("--collection-name", type=str, default="qdrant_documents", help="Nom de la collection Qdrant.")
     parser.add_argument("--embedding-model", type=str, default="sentence-transformers/all-MiniLM-L6-v2", help="Modèle d'embedder.")
     return parser.parse_args()
@@ -98,8 +112,7 @@ def main(args):
 
     client = initialize_qdrant(args.collection_name, vector_size)
 
-    if args.csv_dir:
-        load_documents_from_csv(args.csv_dir, client, args.collection_name, embedder)
+    load_documents_from_csv(args.csv_dir, client, args.collection_name, embedder)
 
     user_query = input("Entrez votre requête : ")
     relevant_text, source = search_best_document(user_query, args.collection_name, embedder, client)
